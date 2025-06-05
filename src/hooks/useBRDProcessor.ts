@@ -26,10 +26,15 @@ export const useBRDProcessor = () => {
       });
 
       if (error) {
-        throw new Error(error.message);
+        console.error('Supabase function error:', error);
+        throw new Error(`Processing failed: ${error.message || 'Unknown error'}`);
       }
 
-      console.log('Document processed:', data);
+      if (!data) {
+        throw new Error('No data returned from processing');
+      }
+
+      console.log('Document processed successfully:', data);
       
       setDocument(content);
       setDocumentId(data.document_id);
@@ -59,9 +64,14 @@ export const useBRDProcessor = () => {
   }, []);
 
   const updateDocument = useCallback(async (newContent: string) => {
-    if (!documentId) return;
+    if (!documentId) {
+      console.warn('No document ID available for update');
+      return;
+    }
     
     try {
+      console.log('Updating document content...');
+      
       // Update document in database
       const { error } = await supabase
         .from('brd_documents')
@@ -69,7 +79,7 @@ export const useBRDProcessor = () => {
         .eq('id', documentId);
 
       if (error) {
-        throw new Error(error.message);
+        throw new Error(`Database update failed: ${error.message}`);
       }
 
       setDocument(newContent);
@@ -77,6 +87,8 @@ export const useBRDProcessor = () => {
       // Re-parse sections locally for immediate UI update
       const parsedSections = parseMarkdownSections(newContent);
       setSections(parsedSections);
+      
+      console.log('Document updated successfully');
       
     } catch (error) {
       console.error('Error updating document:', error);
@@ -98,6 +110,15 @@ export const useBRDProcessor = () => {
       return;
     }
 
+    if (!prompt.trim()) {
+      toast({
+        title: "Empty prompt",
+        description: "Please enter a description of the changes you want to make",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setIsProcessing(true);
     
     try {
@@ -106,16 +127,21 @@ export const useBRDProcessor = () => {
       const { data, error } = await supabase.functions.invoke('ai-brd-processor', {
         body: {
           action: 'ai_edit',
-          prompt,
+          prompt: prompt.trim(),
           document_id: documentId
         }
       });
 
       if (error) {
-        throw new Error(error.message);
+        console.error('AI edit function error:', error);
+        throw new Error(`AI processing failed: ${error.message || 'Unknown error'}`);
       }
 
-      console.log('AI edit completed:', data);
+      if (!data) {
+        throw new Error('No response from AI processing');
+      }
+
+      console.log('AI edit completed successfully:', data);
       
       // Update document content
       setDocument(data.updated_content);
@@ -138,9 +164,10 @@ export const useBRDProcessor = () => {
         })));
       }
       
+      const changes = data.summary_of_changes || [];
       toast({
         title: "AI edit completed",
-        description: data.summary_of_changes.join(', ')
+        description: changes.length > 0 ? changes.join(', ') : 'Document updated successfully'
       });
       
     } catch (error) {
