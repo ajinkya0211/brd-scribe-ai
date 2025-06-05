@@ -9,7 +9,115 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      ai_edits: {
+        Row: {
+          created_at: string
+          document_id: string
+          id: string
+          prompt: string
+          sections_updated: Json
+          summary_of_changes: string[] | null
+        }
+        Insert: {
+          created_at?: string
+          document_id: string
+          id?: string
+          prompt: string
+          sections_updated: Json
+          summary_of_changes?: string[] | null
+        }
+        Update: {
+          created_at?: string
+          document_id?: string
+          id?: string
+          prompt?: string
+          sections_updated?: Json
+          summary_of_changes?: string[] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_edits_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "brd_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      brd_documents: {
+        Row: {
+          created_at: string
+          current_content: string
+          filename: string
+          id: string
+          original_content: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          current_content: string
+          filename: string
+          id?: string
+          original_content: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          current_content?: string
+          filename?: string
+          id?: string
+          original_content?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      brd_sections: {
+        Row: {
+          content: string
+          created_at: string
+          document_id: string
+          end_index: number | null
+          id: string
+          level: number
+          start_index: number | null
+          summary: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          document_id: string
+          end_index?: number | null
+          id?: string
+          level: number
+          start_index?: number | null
+          summary?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          document_id?: string
+          end_index?: number | null
+          id?: string
+          level?: number
+          start_index?: number | null
+          summary?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brd_sections_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "brd_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

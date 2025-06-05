@@ -1,12 +1,159 @@
 
 import { useState, useCallback } from 'react';
-import { Section, AIEditResponse } from '@/types/brd';
+import { Section } from '@/types/brd';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 export const useBRDProcessor = () => {
   const [document, setDocument] = useState<string>('');
   const [sections, setSections] = useState<Section[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [documentId, setDocumentId] = useState<string>('');
+
+  const loadDocument = useCallback(async (content: string, filename: string) => {
+    setIsProcessing(true);
+    
+    try {
+      console.log('Loading document:', filename);
+      
+      // Call the AI processor edge function
+      const { data, error } = await supabase.functions.invoke('ai-brd-processor', {
+        body: {
+          action: 'process_document',
+          content,
+          filename
+        }
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      console.log('Document processed:', data);
+      
+      setDocument(content);
+      setDocumentId(data.document_id);
+      setSections(data.sections.map((section: any) => ({
+        title: section.title,
+        level: section.level,
+        content: section.content,
+        summary: section.summary,
+        startIndex: section.start_index,
+        endIndex: section.end_index
+      })));
+      
+      toast({
+        title: "Document loaded successfully",
+        description: `Processed ${data.sections.length} sections from ${filename}`
+      });
+    } catch (error) {
+      console.error('Error loading document:', error);
+      toast({
+        title: "Error loading document",
+        description: error instanceof Error ? error.message : "Failed to process the BRD file",
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  }, []);
+
+  const updateDocument = useCallback(async (newContent: string) => {
+    if (!documentId) return;
+    
+    try {
+      // Update document in database
+      const { error } = await supabase
+        .from('brd_documents')
+        .update({ current_content: newContent })
+        .eq('id', documentId);
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      setDocument(newContent);
+      
+      // Re-parse sections locally for immediate UI update
+      const parsedSections = parseMarkdownSections(newContent);
+      setSections(parsedSections);
+      
+    } catch (error) {
+      console.error('Error updating document:', error);
+      toast({
+        title: "Error updating document",
+        description: error instanceof Error ? error.message : "Failed to save changes",
+        variant: "destructive"
+      });
+    }
+  }, [documentId]);
+
+  const processAIEdit = useCallback(async (prompt: string) => {
+    if (!documentId) {
+      toast({
+        title: "No document loaded",
+        description: "Please load a document first",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    
+    try {
+      console.log('Processing AI edit with prompt:', prompt);
+      
+      const { data, error } = await supabase.functions.invoke('ai-brd-processor', {
+        body: {
+          action: 'ai_edit',
+          prompt,
+          document_id: documentId
+        }
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      console.log('AI edit completed:', data);
+      
+      // Update document content
+      setDocument(data.updated_content);
+      
+      // Reload sections from database to get updated summaries
+      const { data: updatedSections, error: sectionsError } = await supabase
+        .from('brd_sections')
+        .select('*')
+        .eq('document_id', documentId)
+        .order('start_index');
+
+      if (!sectionsError && updatedSections) {
+        setSections(updatedSections.map((section: any) => ({
+          title: section.title,
+          level: section.level,
+          content: section.content,
+          summary: section.summary,
+          startIndex: section.start_index,
+          endIndex: section.end_index
+        })));
+      }
+      
+      toast({
+        title: "AI edit completed",
+        description: data.summary_of_changes.join(', ')
+      });
+      
+    } catch (error) {
+      console.error('Error processing AI edit:', error);
+      toast({
+        title: "AI edit failed", 
+        description: error instanceof Error ? error.message : "Failed to process your request",
+        variant: "destructive"
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [documentId]);
 
   const parseMarkdownSections = useCallback((content: string): Section[] => {
     const lines = content.split('\n');
@@ -18,7 +165,6 @@ export const useBRDProcessor = () => {
       const headerMatch = line.match(/^(#+)\s+(.+)$/);
       
       if (headerMatch) {
-        // Save previous section if exists
         if (currentSection) {
           parsedSections.push({
             ...currentSection,
@@ -27,7 +173,6 @@ export const useBRDProcessor = () => {
           } as Section);
         }
         
-        // Start new section
         currentSection = {
           title: headerMatch[2],
           level: headerMatch[1].length,
@@ -39,7 +184,6 @@ export const useBRDProcessor = () => {
       }
     });
 
-    // Don't forget the last section
     if (currentSection) {
       parsedSections.push({
         ...currentSection,
@@ -50,127 +194,6 @@ export const useBRDProcessor = () => {
 
     return parsedSections;
   }, []);
-
-  const generateSummary = useCallback(async (content: string): Promise<string> => {
-    // Simulate AI summary generation
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const words = content.split(' ').slice(0, 20);
-        resolve(`Summary: ${words.join(' ')}...`);
-      }, 500);
-    });
-  }, []);
-
-  const loadDocument = useCallback(async (content: string, filename: string) => {
-    setIsProcessing(true);
-    
-    try {
-      console.log('Loading document:', filename);
-      
-      // Parse sections
-      const parsedSections = parseMarkdownSections(content);
-      console.log('Parsed sections:', parsedSections);
-      
-      // Generate summaries for each section
-      const sectionsWithSummaries = await Promise.all(
-        parsedSections.map(async (section) => ({
-          ...section,
-          summary: await generateSummary(section.content)
-        }))
-      );
-      
-      setDocument(content);
-      setSections(sectionsWithSummaries);
-      
-      toast({
-        title: "Document loaded successfully",
-        description: `Processed ${sectionsWithSummaries.length} sections from ${filename}`
-      });
-    } catch (error) {
-      console.error('Error loading document:', error);
-      toast({
-        title: "Error loading document",
-        description: "Failed to process the BRD file",
-        variant: "destructive"
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [parseMarkdownSections, generateSummary]);
-
-  const updateDocument = useCallback((newContent: string) => {
-    setDocument(newContent);
-    
-    // Re-parse sections when document is manually updated
-    const updatedSections = parseMarkdownSections(newContent);
-    setSections(updatedSections.map(section => ({
-      ...section,
-      summary: sections.find(s => s.title === section.title)?.summary || ''
-    })));
-  }, [parseMarkdownSections, sections]);
-
-  const processAIEdit = useCallback(async (prompt: string) => {
-    setIsProcessing(true);
-    
-    try {
-      console.log('Processing AI edit with prompt:', prompt);
-      
-      // Simulate AI planning and editing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Mock AI response
-      const mockResponse: AIEditResponse = {
-        sectionsToUpdate: [
-          {
-            title: sections[0]?.title || "Introduction",
-            reasoning: "User requested changes that affect this section"
-          }
-        ],
-        updatedSections: [
-          {
-            title: sections[0]?.title || "Introduction",
-            content: `${sections[0]?.content || ''}\n\n**AI Generated Addition:** ${prompt}`
-          }
-        ],
-        summaryOfChanges: [
-          `Added content based on prompt: "${prompt}"`
-        ]
-      };
-      
-      // Apply changes to document
-      let updatedDocument = document;
-      mockResponse.updatedSections.forEach(updatedSection => {
-        const sectionIndex = sections.findIndex(s => s.title === updatedSection.title);
-        if (sectionIndex !== -1) {
-          const section = sections[sectionIndex];
-          const before = document.substring(0, section.startIndex || 0);
-          const after = document.substring(section.endIndex || 0);
-          updatedDocument = before + `# ${updatedSection.title}\n${updatedSection.content}\n` + after;
-        }
-      });
-      
-      setDocument(updatedDocument);
-      
-      // Re-parse sections
-      const updatedSections = parseMarkdownSections(updatedDocument);
-      setSections(updatedSections);
-      
-      toast({
-        title: "AI edit completed",
-        description: mockResponse.summaryOfChanges.join(', ')
-      });
-      
-    } catch (error) {
-      console.error('Error processing AI edit:', error);
-      toast({
-        title: "AI edit failed", 
-        description: "Failed to process your request",
-        variant: "destructive"
-      });
-    } finally {
-      setIsProcessing(false);
-    }
-  }, [document, sections, parseMarkdownSections]);
 
   return {
     document,
